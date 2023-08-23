@@ -1,0 +1,70 @@
+#!/bin/bash
+
+#Note:-Master
+set -e
+
+# To off SWAP
+swapoff -a
+
+#To disable Firewall
+ufw disable 
+
+# Load kernel modules
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+# Configure sysctl settings
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward = 1
+EOF
+
+sudo sysctl --system
+
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl vim
+vi /etc/fstab
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo systemctl enable docker
+sudo systemctl restart docker
+
+# Configure containerd
+sudo sed -i 's/disabled_plugins = \["cri"\]/enable_plugins = \["containerd"\]/' /etc/containerd/config.toml
+
+# Restart Docker and containerd
+sudo systemctl restart docker
+sudo systemctl restart containerd
+
+# Add Kubernetes apt repository key
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-archive-keyring.gpg
+
+# Add Kubernetes apt repository
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+# Install Kubernetes components
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+
+#"(# Initialize Kubernetes master node
+sudo kubeadm init
+
+# Set up kubeconfig for the current user
+mkdir -p "$HOME"/.kube
+sudo cp -i /etc/kubernetes/admin.conf "$HOME"/.kube/config
+sudo chown $(id -u):$(id -g) "$HOME"/.kube/config
+
+# Make the cluster ready
+ kubectl apply -f https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml
+
+# To check status (Ready)
+kubectl get nodes)"
